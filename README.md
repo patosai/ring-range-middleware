@@ -2,6 +2,9 @@
 
 HTTP Range middleware for the Clojure Ring server
 
+[![CircleCI](https://circleci.com/gh/patosai/ring-range-middleware.svg?style=svg)](https://circleci.com/gh/patosai/ring-range-middleware)
+
+
 Given a response body and a valid Range header, this middleware fulfills the request's Range header. It works for bodies where the content length is either known or unknown, but uses way less memory when it's known.
 
 The middleware looks for the following to determine the content length:
