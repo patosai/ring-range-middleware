@@ -12,6 +12,11 @@ Otherwise, this middleware has to buffer the body. There is an option for buffer
 
 ## Usage
 
+Leinengen
+```
+[ring-range-middleware "0.1.0"]
+```
+
 You can use it like normal Ring middleware.
 
 ```clojure
