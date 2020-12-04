@@ -13,6 +13,12 @@ The middleware looks for the following to determine the content length:
 
 Otherwise, this middleware has to buffer the body. There is an option for buffer size you can give to the handler.
 
+## Requirements
+- Clojure >=1.0 (I think? 1.7+ definitely works)
+- Ring core >=1.6
+- Ring servlet or Ring jetty adapter >=1.6
+  - The middleware replaces the body with another body on which `ring.core.protocols/write-body-to-stream` needs to be called to stream the bytes to the client. The servlet and jetty adapter do this automatically. If you aren't using these, you will need to find a way to call this protocol method.
+
 ## Usage
 
 Leinengen
