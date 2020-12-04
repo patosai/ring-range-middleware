@@ -5,10 +5,10 @@ HTTP Range middleware for the Clojure Ring server
 [![CircleCI](https://circleci.com/gh/patosai/ring-range-middleware.svg?style=svg)](https://circleci.com/gh/patosai/ring-range-middleware)
 
 
-Given a response body and a valid Range header, this middleware fulfills the request's Range header. If the content length of the body is known (String/File/byte-array/Content-Length response header), the bytes are streamed to the client. Otherwise, serverside buffering is required.
+Given a response body and a valid Range header, this middleware fulfills the request's Range header. If the content length of the body is known, the bytes are streamed to the client. Otherwise, serverside buffering is required.
 
 The middleware looks for the following to determine the content length:
-- if the body is a string, File, or byte-array
+- if the body is a string, File, or byte-array, the length can be determined directly
 - the response Content-Length
 
 Otherwise, this middleware has to buffer the body. There is an option for buffer size you can give to the handler.
