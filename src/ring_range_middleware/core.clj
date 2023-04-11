@@ -6,7 +6,9 @@
             [ring.util.response :refer [status get-header header]])
   (:import [java.io ByteArrayOutputStream File OutputStream]))
 
-(def multipart-newline "\r\n")
+(set! *warn-on-reflection* true)
+
+(def ^String multipart-newline "\r\n")
 
 (def optional-whitespace "[ \\t]*")
 (def at-least-one-digit "\\d+")
@@ -85,7 +87,7 @@
       (when should-write?
         (let [bytes-absolute->relative-offset (+ bytes-absolute-start-offset
                                                  (- bytes-offset))]
-          (.write output-stream
+          (.write ^OutputStream output-stream
                   bytes
                   (+ range-start bytes-absolute->relative-offset)
                   (inc (- range-end range-start))))))))
@@ -114,7 +116,7 @@
     (let [bytes-relative-end-offset (+ bytes-offset bytes-length)
           length-to-take (min bytes-length max-buffer-size-per-range-bytes)
           bytes-relative-start-offset (- bytes-relative-end-offset length-to-take)]
-      (.write output-stream
+      (.write ^OutputStream output-stream
               bytes
               bytes-relative-start-offset
               length-to-take))))
@@ -145,7 +147,7 @@
           bytes-end (dec (+ num-bytes-read bytes-length))
           bytes-absolute->relative-offset (- bytes-offset num-bytes-read)]
       (when (<= bytes-start bytes-end)
-        (.write output-stream
+        (.write ^OutputStream output-stream
                 bytes
                 (+ bytes-start bytes-absolute->relative-offset)
                 (inc (- bytes-end bytes-start)))))))
@@ -249,7 +251,7 @@
                                            (size []
                                              (circular-buffer-size))
                                            (write
-                                             ([byte-arr]
+                                             ([^bytes byte-arr]
                                               (handle-write byte-arr 0 (alength byte-arr)))
                                              ([byte-arr offset length]
                                               (handle-write byte-arr offset length)))
@@ -259,7 +261,7 @@
     limited-byte-array-output-stream))
 
 (defn str-num-bytes
-  [string]
+  [^String string]
   (-> string (.getBytes) (alength)))
 
 (defn- content-length-calculator
@@ -299,7 +301,7 @@
           bytes-read (atom 0)
           handle-write (fn [bytes bytes-offset bytes-length]
                          (doall
-                           (map (fn [idx range buffer]
+                           (map (fn [idx range ^ByteArrayOutputStream buffer]
                                   (let [bytes-to-write (anticipated-number-of-bytes-to-write-to-stream range bytes bytes-offset bytes-length @bytes-read)]
                                     (if (> (+ (.size buffer) bytes-to-write)
                                            max-buffer-size-per-range-bytes)
@@ -312,7 +314,7 @@
                          (swap! bytes-read + bytes-length))
           proxied-stream (proxy [OutputStream] []
                            (write
-                             ([byte-arr]
+                             ([^bytes byte-arr]
                               (handle-write byte-arr 0 (alength byte-arr)))
                              ([byte-arr offset length]
                               (handle-write byte-arr offset length))))]
@@ -336,23 +338,23 @@
           {:keys [ranges byte-buffers total-body-length]} @state]
       (cond
         (= 1 (count ranges))
-        (-> byte-buffers (first) (.writeTo output-stream))
+        (-> byte-buffers ^ByteArrayOutputStream (first) (.writeTo output-stream))
 
         (< 1 (count ranges))
         (do
           (doall
             (map (fn [range buffer]
-                   (.write output-stream (.getBytes (str/join multipart-newline
+                   (.write ^OutputStream output-stream (.getBytes (str/join multipart-newline
                                                               [(str "--" boundary-str)
                                                                (format "Content-Type: %s" content-type)
                                                                (format "Content-Range: %s" (content-range range total-body-length))
                                                                ""
                                                                ""])))
-                   (.writeTo buffer output-stream)
-                   (.write output-stream (.getBytes multipart-newline)))
+                   (.writeTo ^ByteArrayOutputStream buffer output-stream)
+                   (.write ^OutputStream output-stream (.getBytes ^String multipart-newline)))
                  ranges
                  byte-buffers))
-          (.write output-stream (.getBytes (str "--" boundary-str "--"))))))))
+          (.write ^OutputStream output-stream (.getBytes (str "--" boundary-str "--"))))))))
 
 (defrecord StreamingRangeBody [original-body ranges total-body-length content-type boundary-str]
   IContentLengthPrecalculator
@@ -380,28 +382,28 @@
                                      should-write? (<= range-start range-end)]
                                  (when (and (<= bytes-absolute-start-offset first-byte-pos bytes-absolute-end-offset)
                                             has-more-than-one-range?)
-                                   (.write output-stream (.getBytes (str/join multipart-newline
+                                   (.write ^OutputStream output-stream (.getBytes (str/join multipart-newline
                                                                               [(format "--%s" boundary-str)
                                                                                (format "Content-Type: %s" content-type)
                                                                                (format "Content-Range: %s" (content-range first-range total-body-length)) ""
                                                                                ""]))))
                                  (when should-write?
-                                   (.write output-stream
+                                   (.write ^OutputStream output-stream
                                            bytes
                                            (+ range-start bytes-absolute->relative-offset)
                                            (inc (- range-end range-start))))
                                  (when (and (<= bytes-absolute-start-offset last-byte-pos bytes-absolute-end-offset)
                                             has-more-than-one-range?)
-                                   (.write output-stream (.getBytes multipart-newline))
+                                   (.write ^OutputStream output-stream (.getBytes multipart-newline))
                                    (swap! ranges rest)
                                    (if (empty? @ranges)
-                                     (.write output-stream (.getBytes (format "--%s--" boundary-str)))
+                                     (.write ^OutputStream output-stream (.getBytes (format "--%s--" boundary-str)))
                                      (recur))))))
                            (reset! bytes-read new-bytes-read)))
           proxied-stream (proxy [OutputStream] []
                            (write
                              ([byte-arr]
-                              (handle-write byte-arr 0 (alength byte-arr)))
+                              (handle-write byte-arr 0 (alength ^bytes byte-arr)))
                              ([byte-arr offset length]
                               (handle-write byte-arr offset length))))]
       (write-body-to-stream original-body response proxied-stream))))
@@ -414,7 +416,7 @@
   ([response opts] (add-headers-to-response response nil opts))
   ([response ranges {:keys [total-body-length boundary-str] :as opts}]
    (let [{:keys [body] :as response} (add-accept-ranges-header-to-response response)]
-     (case (:status response)
+     (case (int (:status response))
        200
        (cond
          (= 1 (count ranges))
@@ -475,9 +477,9 @@
 (defn find-body-content-length
   [{:keys [body] :as response}]
   (cond
-    (string? body) (-> body (.getBytes) (alength))
-    (is-bytes? body) (alength body)
-    (instance? File body) (.length body)
+    (string? body) (-> ^String body (.getBytes) (alength))
+    (is-bytes? body) (alength ^bytes body)
+    (instance? File body) (.length ^File body)
     :else (maybe-parse-long (get-header response "Content-Length"))))
 
 (defn- ensure-response-has-content-type-if-multirange
