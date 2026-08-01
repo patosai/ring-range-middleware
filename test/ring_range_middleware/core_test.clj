@@ -55,6 +55,37 @@
                         "Content-Range" "bytes 206-255/256"}
               :status 206})))
 
+    (testing "file ranges use SeekingFileRangeBody"
+      (let [handler (wrap-range-header
+                     (constantly {:status 200
+                                  :body binary-file-with-all-possible-bytes}))
+            result (handler {:request-method :get
+                             :headers {"Range" "bytes=10-20"}})]
+        (is (= 206 (:status result)))
+        (is (instance? ring_range_middleware.core.SeekingFileRangeBody (:body result)))))
+
+    (testing "streaming bodies stop reading after the requested range"
+      (let [bytes-fed (atom 0)
+            chunked-body (reify StreamableResponseBody
+                           (write-body-to-stream [_ _ output-stream]
+                             (loop [remaining 10000]
+                               (when (pos? remaining)
+                                 (let [n (min 100 remaining)
+                                       chunk (byte-array n (unchecked-byte 7))]
+                                   (swap! bytes-fed + n)
+                                   (.write ^java.io.OutputStream output-stream chunk)
+                                   (recur (- remaining n)))))))
+            response (run-range-middleware-and-convert-body-to-str
+                      {:status 200
+                       :headers {"Content-Length" "10000"}
+                       :body chunked-body}
+                      {:request-method :get
+                       :headers {"Range" "bytes=0-9"}})]
+        (is (= 206 (:status response)))
+        (is (= 10 (count (.getBytes ^String (:body response)))))
+        ;; Without short-circuit the source would feed all 10000 bytes.
+        (is (= 100 @bytes-fed))))
+
     (testing "it works with input streams"
       (is (= (run-range-middleware-and-convert-body-to-str
                (assoc response :body (string-input-stream "some string in a stream"))

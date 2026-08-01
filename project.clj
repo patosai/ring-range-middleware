@@ -1,4 +1,4 @@
-(defproject ring-range-middleware "0.1.0"
+(defproject ring-range-middleware "0.2.0"
   :description "HTTP Range middleware for the Clojure Ring server"
   :url "https://github.com/patosai/ring-range-middleware"
   :license {:name "MIT"}

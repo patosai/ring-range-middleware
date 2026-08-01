@@ -4,7 +4,23 @@
             [ring.core.protocols :refer :all]
             [ring.middleware.content-type :refer [content-type-response]]
             [ring.util.response :refer [status get-header header]])
-  (:import [java.io ByteArrayOutputStream File OutputStream]))
+  (:import [java.io ByteArrayOutputStream EOFException File OutputStream RandomAccessFile]))
+
+(def ^:private ^:const copy-buffer-size 65536)
+
+(defn- copy-file-range!
+  "Seek to `start` and copy exactly `nbytes` from raf into output-stream."
+  [^RandomAccessFile raf ^OutputStream output-stream ^long start ^long nbytes]
+  (.seek raf start)
+  (let [buf (byte-array (int (min nbytes copy-buffer-size)))]
+    (loop [remaining nbytes]
+      (when (pos? remaining)
+        (let [to-read (int (min remaining (alength buf)))
+              n (.read raf buf 0 to-read)]
+          (when (neg? n)
+            (throw (EOFException. "Unexpected EOF while reading byte range")))
+          (.write output-stream buf 0 n)
+          (recur (- remaining n)))))))
 
 (set! *warn-on-reflection* true)
 
@@ -356,6 +372,55 @@
                  byte-buffers))
           (.write ^OutputStream output-stream (.getBytes (str "--" boundary-str "--"))))))))
 
+(defrecord SeekingFileRangeBody [^File file ranges total-body-length content-type boundary-str]
+  IContentLengthPrecalculator
+  (content-length [this]
+    (content-length-calculator ranges
+                               {:total-body-length total-body-length
+                                :content-type content-type
+                                :boundary-str boundary-str}))
+  StreamableResponseBody
+  (write-body-to-stream [this response output-stream]
+    (let [^OutputStream output-stream output-stream
+          closed-ranges (-> ranges
+                            (convert-ranges-to-closed-byte total-body-length)
+                            (sort-byte-ranges))]
+      (try
+        (with-open [raf (RandomAccessFile. file "r")]
+          (if (= 1 (count closed-ranges))
+            (let [range (first closed-ranges)
+                  start (long (start-byte range total-body-length))
+                  nbytes (long (length range total-body-length))]
+              (copy-file-range! raf output-stream start nbytes))
+            (do
+              (doseq [range closed-ranges]
+                (let [start (long (start-byte range total-body-length))
+                      nbytes (long (length range total-body-length))]
+                  (.write output-stream
+                          (.getBytes ^String
+                                     (str/join multipart-newline
+                                               [(format "--%s" boundary-str)
+                                                (format "Content-Type: %s" content-type)
+                                                (format "Content-Range: %s"
+                                                        (content-range range total-body-length))
+                                                ""
+                                                ""])))
+                  (copy-file-range! raf output-stream start nbytes)
+                  (.write output-stream (.getBytes ^String multipart-newline))))
+              (.write output-stream (.getBytes ^String (format "--%s--" boundary-str))))))
+        (finally
+          (.close output-stream))))))
+
+(defn- throw-range-satisfied!
+  []
+  (throw (ex-info "range satisfied"
+                  {::range-satisfied? true})))
+
+(defn- range-satisfied-ex?
+  [t]
+  (boolean (and (instance? clojure.lang.ExceptionInfo t)
+                (::range-satisfied? (ex-data t)))))
+
 (defrecord StreamingRangeBody [original-body ranges total-body-length content-type boundary-str]
   IContentLengthPrecalculator
   (content-length [this]
@@ -365,10 +430,12 @@
                                 :boundary-str boundary-str}))
   StreamableResponseBody
   (write-body-to-stream [this response output-stream]
-    (let [ranges (atom (-> ranges
-                           (convert-ranges-to-closed-byte total-body-length)
-                           (sort-byte-ranges)))
-          has-more-than-one-range? (> (count @ranges) 1)
+    (let [closed-ranges (-> ranges
+                            (convert-ranges-to-closed-byte total-body-length)
+                            (sort-byte-ranges))
+          ranges (atom closed-ranges)
+          has-more-than-one-range? (> (count closed-ranges) 1)
+          max-end (apply max (map :last-byte-pos closed-ranges))
           bytes-read (atom 0)
           handle-write (fn [^bytes bytes offset length]
                          (let [new-bytes-read (+ length @bytes-read)
@@ -399,14 +466,20 @@
                                    (if (empty? @ranges)
                                      (.write ^OutputStream output-stream (.getBytes (format "--%s--" boundary-str)))
                                      (recur))))))
-                           (reset! bytes-read new-bytes-read)))
+                           (reset! bytes-read new-bytes-read)
+                           (when (> @bytes-read max-end)
+                             (throw-range-satisfied!))))
           proxied-stream (proxy [OutputStream] []
                            (write
                              ([byte-arr]
                               (handle-write byte-arr 0 (alength ^bytes byte-arr)))
                              ([byte-arr offset length]
                               (handle-write byte-arr offset length))))]
-      (write-body-to-stream original-body response proxied-stream))))
+      (try
+        (write-body-to-stream original-body response proxied-stream)
+        (catch Exception e
+          (when-not (range-satisfied-ex? e)
+            (throw e)))))))
 
 (defn add-accept-ranges-header-to-response
   [response]
@@ -451,14 +524,21 @@
                        (boundary-generator-fn))
         content-type (get-header response "Content-Type")]
     (if (some? total-body-length)
-      (-> response
-          (assoc :body (map->StreamingRangeBody {:original-body body
-                                                 :ranges ranges
-                                                 :total-body-length total-body-length
-                                                 :content-type content-type
-                                                 :boundary-str boundary-str}))
-          (add-headers-to-response ranges {:total-body-length total-body-length
-                                           :boundary-str boundary-str}))
+      (let [range-body (if (instance? File body)
+                         (map->SeekingFileRangeBody {:file body
+                                                     :ranges ranges
+                                                     :total-body-length total-body-length
+                                                     :content-type content-type
+                                                     :boundary-str boundary-str})
+                         (map->StreamingRangeBody {:original-body body
+                                                   :ranges ranges
+                                                   :total-body-length total-body-length
+                                                   :content-type content-type
+                                                   :boundary-str boundary-str}))]
+        (-> response
+            (assoc :body range-body)
+            (add-headers-to-response ranges {:total-body-length total-body-length
+                                             :boundary-str boundary-str})))
       (let [buffering-body (map->BufferingRangeBody {:original-body body
                                                      :ranges ranges
                                                      :content-type content-type
