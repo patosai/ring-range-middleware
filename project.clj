@@ -4,4 +4,6 @@
   :license {:name "MIT"}
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [ring/ring-core "1.8.2"]]
-  :repl-options {:init-ns ring-range-middleware.core})
+  :repl-options {:init-ns ring-range-middleware.core}
+  :deploy-repositories [["clojars" {:url "https://clojars.org/repo"
+                                    :sign-releases false}]])
