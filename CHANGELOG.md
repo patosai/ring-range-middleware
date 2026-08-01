@@ -1,24 +1,13 @@
 # Change Log
 All notable changes to this project will be documented in this file. This change log follows the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
-## [Unreleased]
-### Changed
-- Add a new arity to `make-widget-async` to provide a different widget shape.
-
-## [0.1.1] - 2020-12-02
-### Changed
-- Documentation on how to make the widgets.
-
-### Removed
-- `make-widget-sync` - we're all async, all the time.
-
+## [0.2.0] - 2026-08-01
 ### Fixed
-- Fixed widget maker to keep working when daylight savings switches over.
+- File bodies now serve Range responses by seeking with `RandomAccessFile` instead of streaming the entire file and filtering. This makes video/large-file partial content requests O(range size) rather than O(file size).
+- Streaming range responses (non-File bodies with known length) stop reading the source once all requested ranges have been written, instead of draining the rest of the body.
 
 ## 0.1.0 - 2020-12-02
 ### Added
-- Files from the new template.
-- Widget maker public API - `make-widget-sync`.
+- Initial HTTP Range middleware for Ring.
 
-[Unreleased]: https://github.com/your-name/ring-range-middleware/compare/0.1.1...HEAD
-[0.1.1]: https://github.com/your-name/ring-range-middleware/compare/0.1.0...0.1.1
+[0.2.0]: https://github.com/patosai/ring-range-middleware/compare/0.1.0...0.2.0

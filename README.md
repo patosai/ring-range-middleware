@@ -8,9 +8,12 @@ HTTP Range middleware for the Clojure Ring server
 
 Given a response body and a valid Range header, this middleware fulfills the request's Range header. If the content length of the body is known, the bytes are streamed to the client. Otherwise, serverside buffering is required (options can be passed for buffer size).
 
+For `java.io.File` bodies, ranges are served by seeking with `RandomAccessFile` (O(range size)), which matters for large media files. Other bodies with a known length are filtered while streaming and stop reading once the requested ranges are satisfied.
+
 The middleware looks for the following to determine the content length:
 - if the body is a string, File, or byte-array, the length can be determined directly
 - the response Content-Length
+
 
 ## Requirements
 - Clojure >=1.0 (I think? 1.7+ definitely works)
@@ -22,7 +25,7 @@ The middleware looks for the following to determine the content length:
 
 Leinengen
 ```
-[ring-range-middleware "0.1.0"]
+[ring-range-middleware "0.2.0"]
 ```
 
 You can use it like normal Ring middleware.
